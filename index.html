@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GoldVault · BOT Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<link rel="stylesheet" href="style.css">
+  <meta property="og:image" content="https://bolt.new/static/og_default.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
+</head>
+<body>
+
+<!-- Animated background -->
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+
+<!-- Header -->
+<header class="topbar">
+  <div class="brand">
+    <div class="logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="32" height="32" fill="none">
+        <path d="M16 2 L28 9 V23 L16 30 L4 23 V9 Z" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+        <path d="M16 8 L22 11.5 V18.5 L16 22 L10 18.5 V11.5 Z" fill="currentColor" opacity="0.9"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <h1 id="appName">GoldVault</h1>
+      <p id="tagline">A gold-backed token with a public proof-of-reserve trail.</p>
+    </div>
+  </div>
+  <div class="wallet-zone">
+    <span id="netBadge" class="badge">Not connected</span>
+    <button id="connectBtn" class="btn primary" type="button">Connect wallet</button>
+  </div>
+</header>
+
+<!-- Main content -->
+<main>
+
+  <!-- Hero strip -->
+  <section class="hero" id="heroSection">
+    <div class="hero-left">
+      <span class="hero-eyebrow">BOT Chain Testnet · Chain ID 968</span>
+      <h2 class="hero-title">Digital gold, <span class="grad-text">backed for real</span>.</h2>
+      <p class="hero-desc" id="heroAbout">One GGOLD equals one gram of physical gold. Every token is minted against verified vault reserves, and every reserve record is published on-chain for anyone to audit.</p>
+      <div class="hero-cta">
+        <button class="btn primary lg" onclick="scrollToSection('actions')">Start minting</button>
+        <button class="btn ghost lg" onclick="scrollToSection('reserve')">View reserves</button>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="reserve-ring" id="reserveRing">
+        <svg viewBox="0 0 200 200" width="220" height="220">
+          <circle cx="100" cy="100" r="85" class="ring-bg"/>
+          <circle cx="100" cy="100" r="85" class="ring-fill" id="ringFill"/>
+          <defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#d4a437"/>
+              <stop offset="100%" stop-color="#f5d97a"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <div class="ring-center">
+          <span class="ring-label">Backing ratio</span>
+          <span class="ring-value" id="ringValue">—</span>
+          <span class="ring-sub" id="ringSub">awaiting data</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live stats -->
+  <section class="stats" id="stats" aria-label="Live on-chain numbers"></section>
+
+  <!-- Two column panels -->
+  <div class="panels">
+    <div class="panel-col">
+      <p class="sec-label">Actions</p>
+      <section class="grid" id="actions"></section>
+    </div>
+    <div class="panel-col">
+      <p class="sec-label">Lookups</p>
+      <section class="grid" id="views"></section>
+    </div>
+  </div>
+
+  <!-- Reserve trail -->
+  <section class="card reserve-card" id="reserve">
+    <div class="card-head">
+      <h3>Proof-of-reserve trail</h3>
+      <button class="btn ghost sm" id="refreshReserveBtn" type="button">Refresh</button>
+    </div>
+    <div class="reserve-body" id="reserveBody">
+      <div class="empty-state">Connect to load the reserve trail.</div>
+    </div>
+  </section>
+
+  <!-- Tokens -->
+  <section class="card tokens-card" id="tokens"></section>
+
+</main>
+
+<!-- Deploy bar -->
+<div class="deploy-bar" id="deployBar">
+  <div class="deploy-info">
+    <span class="deploy-dot"></span>
+    <span id="deployText">No contract deployed yet. Deploy to get started.</span>
+  </div>
+  <button class="btn primary" id="deployBtn" type="button">Deploy contracts</button>
+</div>
+
+<!-- Status toast container -->
+<div class="status" id="status" role="status" aria-live="polite"></div>
+
+<!-- Footer -->
+<footer class="foot">
+  <span>BOT Chain Testnet · Chain ID 968</span>
+  <nav>
+    <a class="footlink" href="https://botchain.ai" target="_blank" rel="noopener">botchain.ai</a>
+    <a class="footlink" href="https://scan.botchain.ai" target="_blank" rel="noopener">Explorer</a>
+  </nav>
+</footer>
+
+<script src="artifacts.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
