@@ -1,75 +1,49 @@
-// GoldVault platform configuration
+// GoldVault on BOT Chain mainnet.
+// GGOLD has 18 decimals: 1 GGOLD = 1 gram. Gram inputs below are typed in whole/decimal grams
+// and converted to 18-decimal units before they reach the contract.
 window.APP_CONFIG = {
-  address: "0x0000000000000000000000000000000000000000",
-  slug: "goldvault",
+  address: "0xa1b6C8623cAa6D7Afd721dea68D1110b533BDb97",
   name: "GoldVault",
-  accent: "#d4a437",
   tagline: "A gold-backed token with a public proof-of-reserve trail.",
-  about:
-    "One GGOLD equals one gram of physical gold. The admin publishes verifiable reserve records, and minting is capped by the latest record. Mint and redeem settle in the stablecoin at the admin-set price per gram.",
-  tokens: ["payToken"],
-  deploy: {
-    tokens: [{ name: "Mock USD", symbol: "mUSD" }],
-    args: ["$t0", "70000000000000000000"]
-  },
-  amountFields: ["grams", "payoutPool"],
-  timeFields: ["timestamp"],
+
   stats: [
-    { label: "Price per gram", fn: "pricePerGram", fmt: "token" },
-    { label: "GGOLD supply", fn: "totalSupply", fmt: "token" },
-    { label: "Grams in reserve", fn: "reservedGrams", fmt: "token" },
-    { label: "Backing ratio", fn: "backingRatioBps", fmt: "bps" },
-    { label: "Your GGOLD", fn: "balanceOf", fmt: "token", args: ["me"] },
-    { label: "Payout pool", fn: "payoutPool", fmt: "token" }
+    { label: "Price per gram",   fn: "pricePerGram",   fmt: "bot" },
+    { label: "GGOLD supply",     fn: "totalSupply",    fmt: "grams" },
+    { label: "Proven reserve",   fn: "reservedGrams",  fmt: "grams" },
+    { label: "Backing ratio",    fn: "backingRatioBps", fmt: "bps" },
+    { label: "Payout pool",      fn: "__balance",      fmt: "bot" },
+    { label: "Your GGOLD",       fn: "balanceOf",      fmt: "grams", args: ["me"] }
   ],
+
+  // cost: "mint"  → sends exactly grams × pricePerGram as BOT
+  // valueInput    → that input is sent as BOT (msg.value) instead of as an argument
+  // owner: true   → only shown to the contract owner
   actions: [
-    {
-      title: "Mint GGOLD",
-      fn: "mint",
-      desc: "Buy gold-backed tokens with mUSD. One GGOLD = one gram.",
-      inputs: [{ id: "grams", label: "Grams", type: "amount", default: "5" }]
-    },
-    {
-      title: "Redeem GGOLD",
-      fn: "redeem",
-      desc: "Burn GGOLD and receive mUSD at the current price per gram.",
-      inputs: [{ id: "grams", label: "Grams", type: "amount", default: "5" }]
-    },
-    {
-      title: "Publish reserve record",
-      fn: "updateReserve",
-      desc: "Admin: publish the grams of gold held in the vault, with an audit reference.",
-      inputs: [
-        { id: "grams", label: "Grams in vault", type: "amount", default: "100" },
-        { id: "ref", label: "Audit reference", type: "text", default: "Vault audit #1" }
-      ]
-    },
-    {
-      title: "Set price per gram",
-      fn: "setPrice",
-      desc: "Admin: update the price per gram (in mUSD, 18 decimals).",
-      inputs: [{ id: "p", label: "Price", type: "amount", default: "70" }]
-    },
-    {
-      title: "Fund payout pool",
-      fn: "fundPayouts",
-      desc: "Admin: deposit mUSD into the payout pool for redemptions.",
-      inputs: [{ id: "amount", label: "Amount", type: "amount", default: "1000" }]
-    }
+    { title: "Mint GGOLD", fn: "mint", cost: "mint", button: "Mint",
+      desc: "Pay BOT at the current price to mint GGOLD, up to the proven reserve.",
+      inputs: [{ id: "grams", label: "Grams", type: "grams", default: "1" }] },
+    { title: "Redeem GGOLD", fn: "redeem", button: "Redeem",
+      desc: "Burn GGOLD and receive BOT at the current price from the payout pool.",
+      inputs: [{ id: "grams", label: "Grams", type: "grams", default: "1" }] },
+    { title: "Transfer GGOLD", fn: "transfer", button: "Send",
+      desc: "Send GGOLD to another wallet.",
+      inputs: [{ id: "to", label: "Recipient", type: "address" }, { id: "amount", label: "Grams", type: "grams", default: "1" }] },
+    { title: "Fund payout pool", fn: "fundPayouts", valueInput: "amount", button: "Fund",
+      desc: "Add BOT to the pool that pays redemptions. Anyone can fund it.",
+      inputs: [{ id: "amount", label: "Amount (BOT)", type: "bot", default: "1" }] },
+    { title: "Publish reserve (owner)", fn: "updateReserve", owner: true, button: "Publish",
+      desc: "Record the audited grams held in the vault, with a link or IPFS CID to the audit report.",
+      inputs: [{ id: "grams", label: "Grams in vault", type: "grams" }, { id: "ref", label: "Audit reference (URL or CID)", type: "text" }] },
+    { title: "Set price (owner)", fn: "setPrice", owner: true, button: "Update price",
+      desc: "BOT per 1 GGOLD. Applies to both mint and redeem.",
+      inputs: [{ id: "p", label: "Price (BOT per gram)", type: "bot" }] }
   ],
+
   views: [
-    {
-      title: "Reserve record",
-      fn: "reserves",
-      desc: "Look up a specific reserve record by number.",
-      inputs: [{ id: "id", label: "Record number", type: "uint", default: "0" }]
-    },
-    {
-      title: "Reserve count",
-      fn: "reserveCount",
-      button: "Check",
-      desc: "See how many reserve records have been published.",
-      inputs: []
-    }
+    { title: "Balance of", fn: "balanceOf", fmt: "grams", button: "Look up",
+      inputs: [{ id: "a", label: "Address", type: "address", meDefault: true }] },
+    { title: "Mint quote", fn: "__quote", fmt: "bot", button: "Quote",
+      desc: "BOT needed to mint (or received when redeeming) this many grams.",
+      inputs: [{ id: "grams", label: "Grams", type: "grams", default: "1" }] }
   ]
 };

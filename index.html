@@ -45,9 +45,9 @@
   <!-- Hero strip -->
   <section class="hero" id="heroSection">
     <div class="hero-left">
-      <span class="hero-eyebrow">BOT Chain Testnet · Chain ID 968</span>
+      <span class="hero-eyebrow">BOT Chain Mainnet · Chain ID 677</span>
       <h2 class="hero-title">Digital gold, <span class="grad-text">backed for real</span>.</h2>
-      <p class="hero-desc" id="heroAbout">One GGOLD equals one gram of physical gold. Every token is minted against verified vault reserves, and every reserve record is published on-chain for anyone to audit.</p>
+      <p class="hero-desc" id="heroAbout">One GGOLD equals one gram of physical gold. Minting is capped by the latest published vault reserve, and every reserve record is on-chain for anyone to audit.</p>
       <div class="hero-cta">
         <button class="btn primary lg" onclick="scrollToSection('actions')">Start minting</button>
         <button class="btn ghost lg" onclick="scrollToSection('reserve')">View reserves</button>
@@ -96,7 +96,7 @@
       <button class="btn ghost sm" id="refreshReserveBtn" type="button">Refresh</button>
     </div>
     <div class="reserve-body" id="reserveBody">
-      <div class="empty-state">Connect to load the reserve trail.</div>
+      <div class="empty-state">Loading the reserve trail…</div>
     </div>
   </section>
 
@@ -105,21 +105,12 @@
 
 </main>
 
-<!-- Deploy bar -->
-<div class="deploy-bar" id="deployBar">
-  <div class="deploy-info">
-    <span class="deploy-dot"></span>
-    <span id="deployText">No contract deployed yet. Deploy to get started.</span>
-  </div>
-  <button class="btn primary" id="deployBtn" type="button">Deploy contracts</button>
-</div>
-
 <!-- Status toast container -->
 <div class="status" id="status" role="status" aria-live="polite"></div>
 
 <!-- Footer -->
 <footer class="foot">
-  <span>BOT Chain Testnet · Chain ID 968</span>
+  <span>BOT Chain Mainnet · Chain ID 677</span>
   <nav>
     <a class="footlink" href="https://botchain.ai" target="_blank" rel="noopener">botchain.ai</a>
     <a class="footlink" href="https://scan.botchain.ai" target="_blank" rel="noopener">Explorer</a>

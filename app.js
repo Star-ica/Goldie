@@ -1,31 +1,13 @@
 (function () {
   "use strict";
-
-  var ethers = window.ethers;
-  var C = window.APP_CONFIG;
-  var A = window.ARTIFACTS;
-
-  var CHAIN = {
-    id: 968,
-    hex: "0x3c8",
-    name: "BOT Chain Testnet",
-    rpc: "https://rpc.bohr.life",
-    explorer: "https://scan.botchain.ai",
-    currency: { name: "BOT", symbol: "BOT", decimals: 18 }
-  };
-
-  var KEY = "botchain968:" + C.slug;
+  var ethers = window.ethers, C = window.APP_CONFIG, A = window.ARTIFACTS;
+  var CHAIN = { id: 677, hex: "0x2a5", name: "BOT Chain Mainnet", rpc: "https://rpc.botchain.ai", explorer: "https://scan.botchain.ai", currency: { name: "BOT", symbol: "BOT", decimals: 18 } };
   var $ = function (s) { return document.querySelector(s); };
+  var account = null, isOwner = false, txBusy = false, mainAddr = C.address;
+  var readProvider = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: ethers.Network.from(CHAIN.id) });
+  var vault = new ethers.Contract(mainAddr, A.main.abi, readProvider);
 
-  var account = null, signer = null, mainAddr = "";
-  try { mainAddr = localStorage.getItem(KEY) || ""; } catch (e) {}
-  if (!mainAddr) mainAddr = C.address || "";
-
-  var readProvider = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, {
-    staticNetwork: ethers.Network.from(CHAIN.id)
-  });
-
-  // ── Helpers ──────────────────────────────────────────────
+  // ---------- helpers ----------
   function h(tag, attrs) {
     var n = document.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {
@@ -34,102 +16,61 @@
       else if (k.slice(0, 2) === "on") n.addEventListener(k.slice(2), attrs[k]);
       else n.setAttribute(k, attrs[k]);
     });
-    for (var i = 2; i < arguments.length; i++) {
-      var c = arguments[i];
-      if (c == null) continue;
-      n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-    }
+    for (var i = 2; i < arguments.length; i++) { var c = arguments[i]; if (c == null) continue; n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); }
     return n;
   }
-
-  var short = function (a) { return a.slice(0, 6) + "\u2026" + a.slice(-4); };
-  var addrLink = function (a) {
-    return h("a", {
-      href: CHAIN.explorer + "/address/" + a,
-      target: "_blank", rel: "noopener",
-      class: "mono", text: short(a)
-    });
-  };
-
+  var short = function (a) { return a.slice(0, 6) + "…" + a.slice(-4); };
   function units(v) {
-    var s = ethers.formatUnits(v, 18).split(".");
-    var d = (s[1] || "").slice(0, 4).replace(/0+$/, "");
+    var s = ethers.formatUnits(v, 18).split("."), d = (s[1] || "").slice(0, 4).replace(/0+$/, "");
     return BigInt(s[0]).toLocaleString("en-US") + (d ? "." + d : "");
   }
-
   function fmt(kind, v) {
-    if (v === undefined || v === null) return "\u2014";
+    if (v === undefined || v === null) return "—";
     switch (kind) {
-      case "token": return units(v);
-      case "bps": return (Number(v) / 100).toFixed(1) + "%";
-      case "ratio": return v >= (2n ** 200n) ? "\u221e" : Number(ethers.formatUnits(v, 18)).toFixed(3);
-      case "time": return v === 0n ? "\u2014" : new Date(Number(v) * 1000).toLocaleString();
-      case "bool": return v ? "Yes" : "No";
-      case "list": return v.length ? Array.prototype.map.call(v, String).join(", ") : "none";
+      case "bot": return units(v) + " BOT";
+      case "grams": return units(v) + " g";
+      case "bps": return (Number(v) / 100).toFixed(2) + "%";
       default: return String(v);
     }
   }
-
-  function fmtNamed(name, v) {
-    if (typeof v === "bigint") {
-      if (C.enums && C.enums[name]) return C.enums[name][Number(v)] || String(v);
-      if ((C.amountFields || []).indexOf(name) > -1) return units(v);
-      if ((C.timeFields || []).indexOf(name) > -1) return fmt("time", v);
-      return String(v);
-    }
-    if (typeof v === "boolean") return fmt("bool", v);
-    if (typeof v === "string" && ethers.isAddress(v)) return addrLink(v);
-    if (v && typeof v === "object" && v.length !== undefined)
-      return Array.prototype.map.call(v, String).join(", ") || "none";
-    return String(v);
+  var errText = function (e) { return (e && (e.shortMessage || e.reason || (e.info && e.info.error && e.info.error.message) || e.message)) || String(e); };
+  function cleanRevert(e) {
+    var m = errText(e), r = m.match(/reverted(?: with reason string)?:?\s*"?([^"\n]+)"?/i);
+    return r ? r[1].trim() : m;
+  }
+  function withTimeout(p, ms, msg) {
+    return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(msg)); }, ms); })]);
+  }
+  function safeUrl(u) {
+    try { var x = new URL(u); return (x.protocol === "https:" || x.protocol === "http:") ? x.href : ""; } catch (e) { return ""; }
   }
 
-  // ── Toast ────────────────────────────────────────────────
-  function toast(msg, opts) {
-    opts = opts || {};
-    var box = $("#status");
-    var d = h("div", { class: opts.err ? "err" : "" }, msg);
-    if (opts.hash) {
-      d.appendChild(document.createTextNode(" "));
-      d.appendChild(h("a", {
-        href: CHAIN.explorer + "/tx/" + opts.hash,
-        target: "_blank", rel: "noopener", text: "view tx"
-      }));
-    }
-    box.appendChild(d);
-    while (box.children.length > 3) box.removeChild(box.firstChild);
-    if (!opts.sticky)
-      setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, opts.err ? 9000 : 5000);
-    return d;
-  }
-  var errText = function (e) {
-    return (e && (e.shortMessage || e.reason || (e.info && e.info.error && e.info.error.message) || e.message)) || String(e);
+  window.scrollToSection = function (id) {
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // ── Wallet ───────────────────────────────────────────────
-  async function switchChain(quiet) {
+  // ---------- toasts ----------
+  function toast(msg, opts) {
+    opts = opts || {};
+    var box = $("#status"), d = h("div", { class: opts.err ? "err" : "" }, msg);
+    if (opts.hash) { d.appendChild(document.createTextNode(" ")); d.appendChild(h("a", { href: CHAIN.explorer + "/tx/" + opts.hash, target: "_blank", rel: "noopener", text: "view tx" })); }
+    box.appendChild(d);
+    while (box.children.length > 3) box.removeChild(box.firstChild);
+    if (!opts.sticky) setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, opts.err ? 8000 : 5000);
+    return d;
+  }
+
+  // ---------- wallet ----------
+  async function switchChain() {
+    var id = parseInt(await window.ethereum.request({ method: "eth_chainId" }), 16);
+    if (id === CHAIN.id) return;
     try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: CHAIN.hex }]
-      });
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN.hex }] });
     } catch (e) {
       if (e && (e.code === 4902 || e.code === -32603 || /unrecognized|not been added/i.test(e.message || ""))) {
-        try {
-          await window.ethereum.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: CHAIN.hex,
-              chainName: CHAIN.name,
-              nativeCurrency: CHAIN.currency,
-              rpcUrls: [CHAIN.rpc],
-              blockExplorerUrls: [CHAIN.explorer]
-            }]
-          });
-        } catch (e2) { if (!quiet) throw e2; }
-      } else if (e && e.code === 4001) {
-        if (!quiet) throw e;
-      } else { if (!quiet) throw e; }
+        await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{ chainId: CHAIN.hex, chainName: CHAIN.name, nativeCurrency: CHAIN.currency, rpcUrls: [CHAIN.rpc], blockExplorerUrls: [CHAIN.explorer] }] });
+      } else throw e;
     }
   }
 
@@ -138,126 +79,99 @@
       if (!quiet) throw new Error("No wallet found. Install MetaMask or another EVM wallet, then reload.");
       return;
     }
-    try {
-      var accounts = await window.ethereum.request({
-        method: quiet ? "eth_accounts" : "eth_requestAccounts"
-      });
-      if (!accounts || !accounts.length) return;
-      await switchChain(quiet);
-      signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
-      account = await signer.getAddress();
-      await refreshBadge();
-      await refreshAll();
-    } catch (e) {
-      if (!quiet) throw e;
-    }
-  }
-
-  async function ensureWallet() {
-    if (!signer) await connect(false);
-    var id = await window.ethereum.request({ method: "eth_chainId" });
-    if (parseInt(id, 16) !== CHAIN.id) {
-      await switchChain(false);
-      signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    var accounts = await withTimeout(
+      window.ethereum.request({ method: quiet ? "eth_accounts" : "eth_requestAccounts" }),
+      quiet ? 5000 : 60000,
+      "Wallet did not respond. Open MetaMask from the toolbar and clear pending requests."
+    );
+    if (!accounts || !accounts.length) return;
+    account = ethers.getAddress(accounts[0]);
+    try { isOwner = (await vault.owner()).toLowerCase() === account.toLowerCase(); } catch (e) { isOwner = false; }
+    await refreshBadge();
+    renderActions();
+    await refreshAll();
+    if (!quiet) {
+      // Switch network in the background so a hidden prompt can't freeze connect
+      withTimeout(switchChain(), 60000, "switch").then(refreshBadge)
+        .catch(function () { toast("Switch your wallet to BOT Chain (677) before sending transactions", { err: true }); });
     }
   }
 
   async function refreshBadge() {
     var b = $("#netBadge"), btn = $("#connectBtn");
-    if (!account) {
-      b.textContent = "Not connected"; b.className = "badge";
-      btn.textContent = "Connect wallet"; return;
-    }
-    var id = parseInt(await window.ethereum.request({ method: "eth_chainId" }), 16);
+    if (!account) { b.textContent = "Not connected"; b.className = "badge"; btn.textContent = "Connect wallet"; return; }
     btn.textContent = short(account);
-    if (id === CHAIN.id) { b.textContent = CHAIN.name + " (968)"; b.className = "badge ok"; }
-    else { b.textContent = "Wrong network (" + id + ")"; b.className = "badge bad"; }
+    try {
+      var id = parseInt(await window.ethereum.request({ method: "eth_chainId" }), 16);
+      if (id === CHAIN.id) { b.textContent = CHAIN.name + " (677)"; b.className = "badge ok"; }
+      else { b.textContent = "Wrong network (" + id + ")"; b.className = "badge bad"; }
+    } catch (e) {}
   }
 
-  function runner() { return signer || readProvider; }
-  function mainC() { return new ethers.Contract(mainAddr, A.main.abi, runner()); }
-  function tokenC(addr) { return new ethers.Contract(addr, A.token.abi, runner()); }
-
-  async function send(label, call) {
-    await ensureWallet();
-    var t = toast(label + ": confirm in your wallet\u2026", { sticky: true });
+  // Estimate on our own RPC (reverts show the contract's message), then hand the wallet a complete tx
+  async function send(label, fn, args, value) {
+    if (!account) await connect(false);
+    if (!account) throw new Error("Connect your wallet first");
+    if (txBusy) throw new Error("Another transaction is still pending");
+    txBusy = true;
+    var t = null, p = null;
     try {
-      var tx = await call();
-      t.remove();
-      var p = toast(label + ": pending\u2026", { sticky: true, hash: tx.hash });
-      await tx.wait();
-      p.remove();
-      toast(label + " confirmed \u2713", { hash: tx.hash });
+      await withTimeout(switchChain(), 60000, "Approve the switch to BOT Chain in your wallet");
+      value = value || 0n;
+      var data = vault.interface.encodeFunctionData(fn, args || []);
+      var gas;
+      try { gas = await readProvider.estimateGas({ from: account, to: mainAddr, data: data, value: value }); }
+      catch (e) { throw new Error(cleanRevert(e)); }
+      t = toast(label + ": confirm in your wallet…", { sticky: true });
+      var hash = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{ from: account, to: mainAddr, data: data, value: ethers.toQuantity(value), gas: ethers.toQuantity(gas * 12n / 10n) }]
+      });
+      t.remove(); t = null;
+      p = toast(label + ": pending…", { sticky: true, hash: hash });
+      var r = await readProvider.waitForTransaction(hash, 1, 180000);
+      p.remove(); p = null;
+      if (!r) throw new Error("not confirmed within 3 minutes, check the explorer");
+      if (r.status !== 1) throw new Error("transaction reverted");
+      toast(label + " confirmed ✓", { hash: hash });
       await refreshAll();
     } catch (e) {
-      t.remove();
-      toast(label + " failed: " + errText(e), { err: true });
-    }
+      if (t) t.remove(); if (p) p.remove();
+      throw new Error(label + " failed: " + errText(e));
+    } finally { txBusy = false; }
   }
 
-  // ── Inputs ───────────────────────────────────────────────
+  // ---------- inputs ----------
   function field(inp) {
-    var id = "f_" + inp.id, ctl;
-    if (inp.type === "bool") {
-      ctl = h("select", { id: id });
-      (inp.options || [["true", "Yes"], ["false", "No"]]).forEach(function (o) {
-        ctl.appendChild(h("option", { value: o[0], text: o[1] }));
-      });
-    } else {
-      ctl = h("input", {
-        id: id,
-        autocomplete: "off",
-        inputmode: (inp.type === "amount" || inp.type === "uint" || inp.type === "days" || inp.type === "daysFromNow") ? "decimal" : "text",
-        placeholder: inp.placeholder || (inp.type === "address" ? (inp.meDefault ? "0x\u2026 (blank = you)" : "0x\u2026") : ""),
-        value: inp.default != null ? inp.default : ""
-      });
-    }
-    return h("label", {}, h("span", { text: inp.label }), ctl);
+    var numeric = inp.type === "grams" || inp.type === "bot";
+    var ph = inp.placeholder || (inp.type === "address" ? (inp.meDefault ? "0x… (blank = you)" : "0x…") : "");
+    var ctl = h("input", { id: "f_" + inp.id, autocomplete: "off", inputmode: numeric ? "decimal" : "text", placeholder: ph, value: inp.default != null ? inp.default : "" });
+    return h("label", {}, inp.label, ctl);
   }
 
   function parse(inp, form) {
-    var el = form.querySelector("#f_" + inp.id), v = (el.value || "").trim();
-    if (inp.type === "bool") return v === "true";
+    var v = (form.querySelector("#f_" + inp.id).value || "").trim();
     if (v === "" && !(inp.type === "address" && inp.meDefault)) throw new Error(inp.label + " is required");
     switch (inp.type) {
-      case "amount": return ethers.parseUnits(v, 18);
-      case "uint": return BigInt(v);
-      case "days": return BigInt(v) * 86400n;
-      case "daysFromNow": return BigInt(Math.floor(Date.now() / 1000)) + BigInt(v) * 86400n;
+      case "grams":
+      case "bot":
+        var n = ethers.parseUnits(v, 18);
+        if (n <= 0n) throw new Error(inp.label + " must be greater than 0");
+        return n;
       case "address":
-        if (v === "" || v.toLowerCase() === "me") {
-          if (!account) throw new Error("Connect your wallet first");
-          return account;
-        }
+        if (v === "" || v.toLowerCase() === "me") { if (!account) throw new Error("Connect your wallet first"); return account; }
         if (!ethers.isAddress(v)) throw new Error(inp.label + " is not a valid address");
+        if (BigInt(v) === 0n) throw new Error("Sending to the zero address would burn the tokens");
         return v;
       default: return v;
     }
   }
 
-  // ── Sections ─────────────────────────────────────────────
-  function renderResult(fnName, res) {
-    var outs = mainC().interface.getFunction(fnName).outputs;
-    var dl = h("dl", { class: "kv" });
-    if (outs.length === 1) {
-      var d = h("dd"); d.append(fmtNamed(outs[0].name, res));
-      dl.appendChild(h("dt", { text: outs[0].name || "result" })); dl.appendChild(d);
-    } else {
-      outs.forEach(function (o, i) {
-        var d2 = h("dd"); d2.append(fmtNamed(o.name, res[i]));
-        dl.appendChild(h("dt", { text: o.name || "#" + i })); dl.appendChild(d2);
-      });
-    }
-    return dl;
-  }
-
+  // ---------- sections ----------
   function renderActions() {
     var box = $("#actions"); box.innerHTML = "";
-    (C.actions || []).forEach(function (a) {
-      var form = h("form", {},
-        h("h3", { text: a.title }),
-        a.desc ? h("p", { class: "desc", text: a.desc }) : null
-      );
+    (C.actions || []).filter(function (a) { return !a.owner || isOwner; }).forEach(function (a) {
+      var form = h("form", {}, h("h3", { text: a.title }), a.desc ? h("p", { class: "desc", text: a.desc }) : null);
       var row = h("div", { class: "row" });
       (a.inputs || []).forEach(function (i) { row.appendChild(field(i)); });
       form.appendChild(row);
@@ -266,248 +180,138 @@
       form.addEventListener("submit", async function (ev) {
         ev.preventDefault(); btn.disabled = true;
         try {
-          var args = (a.inputs || []).map(function (i) { return parse(i, form); });
-          if (!mainAddr) throw new Error("Deploy or enter the contract address first");
-          await send(a.title, function () { return mainC()[a.fn].apply(null, args); });
+          var vals = (a.inputs || []).map(function (i) { return parse(i, form); });
+          var args = [], value = 0n;
+          (a.inputs || []).forEach(function (i, k) { if (a.valueInput === i.id) value = vals[k]; else args.push(vals[k]); });
+          if (a.cost === "mint") {
+            // The contract requires exactly grams × pricePerGram / 1e18
+            value = args[0] * (await vault.pricePerGram()) / (10n ** 18n);
+            if (!confirm("Mint " + units(args[0]) + " GGOLD for " + units(value) + " BOT?")) { btn.disabled = false; return; }
+          }
+          if (a.fn === "redeem") {
+            var payout = args[0] * (await vault.pricePerGram()) / (10n ** 18n);
+            if (!confirm("Redeem " + units(args[0]) + " GGOLD for " + units(payout) + " BOT?")) { btn.disabled = false; return; }
+          }
+          await send(a.title, a.fn, args, value);
         } catch (e) { toast(errText(e), { err: true }); }
         btn.disabled = false;
       });
-      box.appendChild(h("div", { class: "act" }, form));
+      box.appendChild(h("div", { class: "card act" }, form));
     });
   }
 
   function renderViews() {
     var box = $("#views"); box.innerHTML = "";
     (C.views || []).forEach(function (v) {
-      var out = h("div");
-      var form = h("form", {},
-        h("h3", { text: v.title }),
-        v.desc ? h("p", { class: "desc", text: v.desc }) : null
-      );
+      var out = h("div"), form = h("form", {}, h("h3", { text: v.title }), v.desc ? h("p", { class: "desc", text: v.desc }) : null);
       var row = h("div", { class: "row" });
       (v.inputs || []).forEach(function (i) { row.appendChild(field(i)); });
       form.appendChild(row);
-      var btn = h("button", { class: "btn ghost", type: "submit", text: v.button || "Look up" });
+      var btn = h("button", { class: "btn", type: "submit", text: v.button || "Look up" });
       form.appendChild(btn); form.appendChild(out);
       form.addEventListener("submit", async function (ev) {
         ev.preventDefault(); out.innerHTML = "";
         try {
-          if (!mainAddr) throw new Error("Deploy or enter the contract address first");
           var args = (v.inputs || []).map(function (i) { return parse(i, form); });
-          var res = await mainC()[v.fn].apply(null, args);
-          out.appendChild(renderResult(v.fn, res));
+          var res = v.fn === "__quote"
+            ? args[0] * (await vault.pricePerGram()) / (10n ** 18n)
+            : await vault[v.fn].apply(null, args);
+          out.appendChild(h("dl", { class: "kv" }, h("dt", { text: "Result" }), h("dd", { text: fmt(v.fmt, res) })));
         } catch (e) { out.appendChild(h("p", { class: "desc", text: errText(e) })); }
       });
-      box.appendChild(h("div", { class: "qry" }, form));
+      box.appendChild(h("div", { class: "card qry" }, form));
     });
   }
 
-  // ── Stats with animated ring ──────────────────────────────
-  var prevRatio = null;
   async function renderStats() {
     var box = $("#stats"); box.innerHTML = "";
-    if (!mainAddr) {
-      box.appendChild(h("div", { class: "empty-state" }, "No contract connected. Deploy or set an address to see live stats."));
-      return;
-    }
-    var c = mainC();
     await Promise.all((C.stats || []).map(async function (s) {
-      var isGold = s.label.indexOf("Price") > -1 || s.label.indexOf("GGOLD") > -1 || s.label.indexOf("reserve") > -1 || s.label.indexOf("ratio") > -1;
-      var cell = h("div", { class: "stat" },
-        h("div", { class: "stat-label", text: s.label }),
-        h("div", { class: "stat-value loading" + (isGold ? " gold" : ""), text: "\u2026" })
-      );
+      var cell = h("div", { class: "stat" }, h("span", { text: s.label }), h("b", { text: "…" }));
       box.appendChild(cell);
       try {
-        if ((s.args || []).indexOf("me") > -1 && !account) {
-          cell.lastChild.textContent = "Connect wallet"; return;
-        }
-        var res = await c[s.fn].apply(null, (s.args || []).map(function (x) { return x === "me" ? account : x; }));
-        if (s.pick) res = res[s.pick];
+        if ((s.args || []).indexOf("me") > -1 && !account) { cell.lastChild.textContent = "Connect wallet"; return; }
+        var res = s.fn === "__balance"
+          ? await readProvider.getBalance(mainAddr)
+          : await vault[s.fn].apply(null, (s.args || []).map(function (x) { return x === "me" ? account : x; }));
         cell.lastChild.textContent = fmt(s.fmt, res);
-        cell.lastChild.classList.remove("loading");
-
-        if (s.fn === "backingRatioBps") {
-          animateRing(Number(res));
-        }
-      } catch (e) {
-        cell.lastChild.textContent = "n/a";
-        cell.lastChild.classList.remove("loading");
-      }
+      } catch (e) { cell.lastChild.textContent = "n/a"; }
     }));
   }
 
-  function animateRing(bps) {
-    var pct = Math.min(100, Math.max(0, bps / 100));
-    var ring = document.getElementById("ringFill");
-    var val = document.getElementById("ringValue");
-    var sub = document.getElementById("ringSub");
-    if (!ring) return;
-    var circ = 534; // 2 * PI * 85
-    ring.style.strokeDashoffset = String(circ - (circ * pct / 100));
-    if (val) val.textContent = pct.toFixed(1) + "%";
-    if (sub) sub.textContent = bps >= 10000 ? "fully backed" : bps > 0 ? "partially backed" : "unbacked";
-  }
-
-  // ── Reserve trail ─────────────────────────────────────────
-  async function renderReserveTrail() {
-    var body = $("#reserveBody");
-    if (!mainAddr) {
-      body.innerHTML = '<div class="empty-state">No contract connected. Deploy or set an address to load the reserve trail.</div>';
-      return;
-    }
-    body.innerHTML = '<div class="empty-state">Loading reserve records\u2026</div>';
+  async function renderRing() {
+    var fill = document.getElementById("ringFill"), val = $("#ringValue"), sub = $("#ringSub");
     try {
-      var c = mainC();
-      var count;
-      try {
-        count = Number(await c.reserveCount());
-      } catch (e) {
-        body.innerHTML = '<div class="empty-state">Could not read reserve count (contract may not be deployed at the configured address).</div>';
-        return;
-      }
-      if (count === 0) {
-        body.innerHTML = '<div class="empty-state">No reserve records published yet. The admin can publish one from the Actions panel.</div>';
-        return;
-      }
-      var list = h("div", { class: "reserve-list" });
-      var max = Math.min(count, 10);
-      for (var i = count - 1; i >= count - max; i--) {
-        try {
-          var r = await c.reserves(i);
-          var grams = r[0], timestamp = r[1], ref = r[2];
-          var item = h("div", { class: "reserve-item" },
-            h("div", { class: "reserve-grams", text: units(grams) + " g" }),
-            h("div", { class: "reserve-meta" },
-              h("div", { class: "reserve-ref", text: String(ref) }),
-              h("div", { class: "reserve-time", text: Number(timestamp) === 0 ? "pending" : new Date(Number(timestamp) * 1000).toLocaleString() })
-            ),
-            h("div", { class: "reserve-badge", text: "#" + (i + 1) })
-          );
-          list.appendChild(item);
-        } catch (e) { /* skip */ }
-      }
-      body.innerHTML = "";
-      body.appendChild(list);
+      var bps = Number(await vault.backingRatioBps());
+      var supply = await vault.totalSupply();
+      var circ = 2 * Math.PI * 85;
+      var pct = Math.min(bps / 10000, 1);
+      fill.style.strokeDasharray = circ;
+      fill.style.strokeDashoffset = circ * (1 - pct);
+      val.textContent = (bps / 100).toFixed(1) + "%";
+      sub.textContent = supply === 0n ? "no GGOLD minted yet" : (bps >= 10000 ? "fully backed" : "under-backed");
     } catch (e) {
-      body.innerHTML = '<div class="empty-state">Error loading reserves: ' + errText(e) + "</div>";
+      val.textContent = "—"; sub.textContent = "could not reach BOT Chain";
     }
   }
 
-  // ── Tokens ────────────────────────────────────────────────
+  async function renderReserves() {
+    var body = $("#reserveBody");
+    try {
+      var n = Number(await vault.reserveCount());
+      if (!n) { body.innerHTML = '<div class="empty-state">No reserve records published yet.</div>'; return; }
+      var ids = Array.from({ length: n }, function (_, i) { return i; }).reverse().slice(0, 50);
+      var rows = await Promise.all(ids.map(function (i) { return vault.reserves(i); }));
+      body.innerHTML = "";
+      rows.forEach(function (r, k) {
+        var ref = r.ref || "", url = safeUrl(ref);
+        if (!url && /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[a-z2-7]+)$/.test(ref)) url = "https://ipfs.io/ipfs/" + ref;
+        body.appendChild(h("div", { class: "reserve-row" },
+          h("b", { text: "#" + ids[k] + " · " + fmt("grams", r.grams) }),
+          h("span", { class: "desc", text: " — " + new Date(Number(r.timestamp) * 1000).toLocaleString() + " — " }),
+          url ? h("a", { href: url, target: "_blank", rel: "noopener", text: ref.length > 40 ? ref.slice(0, 40) + "…" : ref })
+              : h("span", { text: ref || "no reference" })
+        ));
+      });
+    } catch (e) {
+      body.innerHTML = "";
+      body.appendChild(h("div", { class: "empty-state", text: "Could not load reserves: " + errText(e) }));
+    }
+  }
+
   async function renderTokens() {
     var box = $("#tokens"); box.innerHTML = "";
-    if (!mainAddr || !(C.tokens || []).length) { box.style.display = "none"; return; }
-    box.style.display = "";
-    var head = h("div", { class: "card-head" }, h("h3", { text: "Test tokens" }));
-    var body = h("div", { class: "tokens-body" });
-    body.appendChild(h("p", { class: "desc", text: "Get free test tokens, then approve this app to spend them before minting or redeeming." }));
-    box.appendChild(head);
-    for (var i = 0; i < C.tokens.length; i++) {
-      try {
-        var addr = await mainC()[C.tokens[i]]();
-        var t = tokenC(addr), sym = await t.symbol();
-        var bal = account ? await t.balanceOf(account) : null;
-        var al = account ? await t.allowance(account, mainAddr) : null;
-        var row = h("div", { class: "tok" },
-          h("span", { class: "n", text: sym }),
-          h("span", { class: "m" },
-            addrLink(addr),
-            account ? "  \u00b7 balance " + units(bal) + " \u00b7 approved " + (al > 2n ** 200n ? "unlimited" : units(al)) : "  \u00b7 connect wallet to see balance"
-          )
-        );
-        var btnGroup = h("div", { class: "tok-btns" });
-        (function (t, sym) {
-          btnGroup.appendChild(h("button", { class: "btn ghost sm", type: "button", text: "Get 1,000 " + sym, onclick: function () { send("Faucet " + sym, function () { return t.faucet(); }); } }));
-          btnGroup.appendChild(h("button", { class: "btn ghost sm", type: "button", text: "Approve " + sym, onclick: function () { send("Approve " + sym, function () { return t.approve(mainAddr, ethers.MaxUint256); }); } }));
-        })(t, sym);
-        row.appendChild(btnGroup);
-        body.appendChild(row);
-      } catch (e) {
-        body.appendChild(h("p", { class: "desc", text: "Could not read token " + C.tokens[i] + ": " + errText(e) }));
-      }
-    }
-    box.appendChild(body);
-  }
-
-  // ── Refresh all ───────────────────────────────────────────
-  async function refreshAll() {
-    if (mainAddr && mainAddr !== "0x0000000000000000000000000000000000000000") {
-      try {
-        if ((await readProvider.getCode(mainAddr)) === "0x")
-          toast("No contract found at that address on BOT Chain testnet.", { err: true });
-      } catch (e) {}
-    }
-    await Promise.all([renderStats(), renderTokens(), renderReserveTrail()]);
-  }
-
-  // ── Deploy ────────────────────────────────────────────────
-  async function deployAll() {
+    box.appendChild(h("h3", { text: "Your GGOLD" }));
+    if (!account) { box.appendChild(h("p", { class: "desc", text: "Connect your wallet to see your balance." })); return; }
     try {
-      await ensureWallet();
-      var addrs = [], d = C.deploy;
-      for (var i = 0; i < d.tokens.length; i++) {
-        var t = d.tokens[i], m = toast("Deploying " + t.symbol + " (confirm in wallet)\u2026", { sticky: true });
-        var tf = new ethers.ContractFactory(A.token.abi, A.token.bytecode, signer);
-        var tc = await tf.deploy(t.name, t.symbol);
-        await tc.waitForDeployment();
-        addrs.push(await tc.getAddress());
-        m.remove();
-      }
-      var args = d.args.map(function (a) {
-        return typeof a === "string" && a.indexOf("$t") === 0 ? addrs[Number(a.slice(2))] : (a === "$me" ? account : a);
-      });
-      var m2 = toast("Deploying " + C.name + " (confirm in wallet)\u2026", { sticky: true });
-      var f = new ethers.ContractFactory(A.main.abi, A.main.bytecode, signer);
-      var c = await f.deploy.apply(f, args);
-      await c.waitForDeployment();
-      mainAddr = await c.getAddress(); m2.remove();
-      try { localStorage.setItem(KEY, mainAddr); } catch (e) {}
-      toast(C.name + " deployed at " + short(mainAddr) + " \u2713");
-      hideDeployBar();
-      await refreshAll();
-    } catch (e) { toast("Deploy failed: " + errText(e), { err: true }); }
+      var bal = await vault.balanceOf(account);
+      box.appendChild(h("p", { class: "desc", text: "Balance: " + fmt("grams", bal) + " · token " }, h("a", { href: CHAIN.explorer + "/address/" + mainAddr, target: "_blank", rel: "noopener", text: short(mainAddr) })));
+      box.appendChild(h("button", { class: "btn ghost sm", type: "button", text: "Add GGOLD to wallet", onclick: function () {
+        window.ethereum.request({ method: "wallet_watchAsset", params: { type: "ERC20", options: { address: mainAddr, symbol: "GGOLD", decimals: 18 } } })
+          .catch(function (e) { toast(errText(e), { err: true }); });
+      } }));
+    } catch (e) { box.appendChild(h("p", { class: "desc", text: "Could not read balance: " + errText(e) })); }
   }
 
-  function showDeployBar() { $("#deployBar").classList.add("show"); }
-  function hideDeployBar() { $("#deployBar").classList.remove("show"); }
+  async function refreshAll() {
+    try { if ((await readProvider.getCode(mainAddr)) === "0x") toast("No contract found at this address on BOT Chain mainnet.", { err: true }); } catch (e) {}
+    await Promise.all([renderStats(), renderRing(), renderReserves(), renderTokens()]);
+  }
 
-  // ── Scroll helper ─────────────────────────────────────────
-  window.scrollToSection = function (id) {
-    var el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  // ── Boot ──────────────────────────────────────────────────
-  document.title = C.name + " \u00b7 BOT Chain Testnet";
-  document.documentElement.style.setProperty("--accent", C.accent);
-  document.documentElement.style.setProperty("--gold", C.accent);
+  // ---------- boot ----------
+  document.title = C.name + " · BOT Chain";
   $("#appName").textContent = C.name;
   $("#tagline").textContent = C.tagline;
-  if (C.about) $("#heroAbout").textContent = C.about;
 
   $("#connectBtn").addEventListener("click", function () {
     connect(false).catch(function (e) { toast(errText(e), { err: true }); });
   });
+  $("#refreshReserveBtn").addEventListener("click", renderReserves);
 
-  $("#deployBtn").addEventListener("click", deployAll);
-  $("#refreshReserveBtn").addEventListener("click", renderReserveTrail);
-
-  if (window.ethereum) {
-    if (window.ethereum.on) {
-      window.ethereum.on("accountsChanged", function () { signer = null; account = null; refreshBadge(); refreshAll(); });
-      window.ethereum.on("chainChanged", function () { window.location.reload(); });
-    }
-    connect(true).catch(function () {});
+  if (window.ethereum && window.ethereum.on) {
+    window.ethereum.on("accountsChanged", function () { window.location.reload(); });
+    window.ethereum.on("chainChanged", function () { refreshBadge(); });
   }
 
-  renderActions(); renderViews();
-
-  if (!mainAddr || mainAddr === "0x0000000000000000000000000000000000000000") {
-    showDeployBar();
-    renderStats();
-    renderReserveTrail();
-  } else {
-    refreshAll();
-  }
+  renderActions(); renderViews(); refreshAll();
+  if (window.ethereum) connect(true).catch(function () {});
 })();
